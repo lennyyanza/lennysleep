@@ -66,7 +66,7 @@ void loop() {
   if (now - tSec >= 1000) {
     tSec = now;
     noInterrupts(); double s = pdmSum, q = pdmSq; uint32_t n = pdmN; pdmSum = pdmSq = 0; pdmN = 0; interrupts();
-    if (n) { double m = s / n, v = q / n - m * m; float r = v > 0 ? sqrt(v) : 0; if (r > peakRms) peakRms = r; }
+    if (n && now > 3000) { double m = s / n, v = q / n - m * m; float r = v > 0 ? sqrt(v) : 0; if (r > peakRms) peakRms = r; }
     if (rd(BARO, 0x2B, d, 2)) tempC = s16(d) / 100.0;
     if (rd(LUX, 0x94, d, 2)) light = d[0] | d[1] << 8;
   }
