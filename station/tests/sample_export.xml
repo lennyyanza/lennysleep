@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE HealthData [<!ELEMENT HealthData (Record)*>]>
+<HealthData locale="en_US">
+ <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Watch" unit="count/min" startDate="2026-11-14 22:00:00 +0000" endDate="2026-11-14 22:00:00 +0000" value="60"/>
+ <Record type="HKCategoryTypeIdentifierSleepAnalysis" sourceName="Watch" startDate="2026-11-14 22:30:00 -0500" endDate="2026-11-15 05:20:00 -0500" value="HKCategoryValueSleepAnalysisInBed"/>
+ <Record type="HKCategoryTypeIdentifierSleepAnalysis" sourceName="Watch" startDate="2026-11-14 22:41:00 -0500" endDate="2026-11-15 01:00:00 -0500" value="HKCategoryValueSleepAnalysisAsleepCore"/>
+ <Record type="HKCategoryTypeIdentifierSleepAnalysis" sourceName="Watch" startDate="2026-11-15 01:00:00 -0500" endDate="2026-11-15 01:20:00 -0500" value="HKCategoryValueSleepAnalysisAwake"/>
+ <Record type="HKCategoryTypeIdentifierSleepAnalysis" sourceName="Watch" startDate="2026-11-15 01:20:00 -0500" endDate="2026-11-15 05:21:00 -0500" value="HKCategoryValueSleepAnalysisAsleepREM"/>
+ <Record type="HKCategoryTypeIdentifierSleepAnalysis" sourceName="Watch" startDate="2026-11-15 13:00:00 -0500" endDate="2026-11-15 13:40:00 -0500" value="HKCategoryValueSleepAnalysisAsleepCore"/>
+ <Record type="HKCategoryTypeIdentifierSleepAnalysis" sourceName="Watch" startDate="2026-11-15 23:05:00 -0500" endDate="2026-11-16 05:00:00 -0500" value="HKCategoryValueSleepAnalysisAsleepUnspecified"/>
+</HealthData>
