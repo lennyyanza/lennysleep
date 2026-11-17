@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>lennysleep</title>
+<style>
+:root{--bg:#0d0f14;--fg:#e8e6e1;--dim:#8a8f99;--card:#171a22;--ok:#5fbf8f;--warn:#e8a33d;--bad:#e55a5a;--acc:#7aa7ff}
+*{box-sizing:border-box}[hidden]{display:none!important}html,body{margin:0;background:var(--bg);color:var(--fg);font:18px/1.4 system-ui,sans-serif}
+main{max-width:900px;margin:auto;padding:24px 20px}
+h1{font-size:2.2rem;margin:.2em 0}h2{font-size:1.2rem;color:var(--dim);font-weight:500;margin:1.2em 0 .4em}
+.big{font-size:4.5rem;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.row{display:flex;gap:12px;flex-wrap:wrap}.card{background:var(--card);border-radius:14px;padding:14px 18px;flex:1;min-width:150px}
+.card b{display:block;font-size:1.6rem;font-variant-numeric:tabular-nums}.card span{color:var(--dim);font-size:.85rem}
+button{font:inherit;border:0;border-radius:12px;padding:14px 22px;background:#2a2f3b;color:var(--fg);cursor:pointer}
+button.main{background:var(--acc);color:#0d0f14;font-weight:700;font-size:1.6rem;padding:22px 40px}
+button.sel{background:var(--acc);color:#0d0f14}
+.banner{border-radius:12px;padding:12px 16px;margin:12px 0;background:#3a2a10;color:#ffd79a}
+.banner.bad{background:#3a1414;color:#ffb4b4}.banner.demo{background:#1d2b4a;color:#b9d0ff;text-align:center}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px;background:var(--bad)}.dot.on{background:var(--ok)}
+#night{position:fixed;inset:0;background:#000;color:#3a3a3a;display:flex;align-items:flex-end;justify-content:center;padding-bottom:40px;font-size:1.1rem}
+#sunrise{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;color:#2b1200}
+.bar{height:22px;background:#2a2f3b;border-radius:11px;overflow:hidden;position:relative}.bar i{display:block;height:100%;background:var(--ok)}
+table{width:100%;border-collapse:collapse;font-size:.9rem;font-variant-numeric:tabular-nums}th,td{padding:6px 8px;text-align:left;border-bottom:1px solid #222}th{color:var(--dim);font-weight:500}
+.scroll{overflow-x:auto}.muted{color:var(--dim)}.center{text-align:center}a{color:var(--acc)}
+.scale button{min-width:56px}textarea{width:100%;font:inherit;background:var(--card);color:var(--fg);border:1px solid #333;border-radius:10px;padding:10px}
+</style></head><body>
+<div id="demo" class="banner demo" hidden>DEMO · sample data · 10x speed</div>
+<main id="app"></main>
+<div id="night" hidden></div>
+<div id="sunrise" hidden><div class="big" id="sr-time"></div><div id="sr-msg"></div></div>
+<script type="module">
+const $ = s => document.querySelector(s), app = $('#app');
+let D = null, fetchedAt = 0, view = null, manual = null, manualNight = false, camOn = false, audio = null, lastSpeak = 0;
+const ls = { get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d } catch { return d } },
+             set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)) } catch {} } };
+const dt = s => s ? new Date(s.replace(' ', 'T')) : null;
+const now = () => D ? new Date(dt(D.now).getTime() + (performance.now() - fetchedAt) * D.speed) : new Date();
+const hm = d => d ? d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '–';
+const dur = ms => { const m = Math.max(0, Math.round(ms / 60000)); return `${Math.floor(m / 60)}h ${m % 60}m` };
+const iso = d => new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 19);
+const post = (p, b) => fetch(p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json());
+let html = '';
+const set = h => h !== html && (app.innerHTML = html = h, true);
+const log = b => post('/log', { wake_date: D.wake_date, ...b }).then(refresh);
+
+async function refresh() {
+  const r = await fetch('/today'); D = await r.json(); fetchedAt = performance.now();
+  $('#demo').hidden = !D.demo;
+}
+
+// ---------- wake lock: keep the screen on all night ----------
+let lock = null;
+async function keepAwake() { try { if (!lock && 'wakeLock' in navigator) { lock = await navigator.wakeLock.request('screen'); lock.onrelease = () => lock = null } } catch {} }
+document.addEventListener('visibilitychange', keepAwake);
+
+// ---------- state ----------
+function state() {
+  const n = D.night, T = now(), lit = (D.last_reading?.light ?? 0) >= D.light_dark;
+  if (n.left_at) return n.rushed == null ? 'checkin' : 'insights';
+  if (n.woke_at) return 'routine';
+  if (n.alarm_at && T >= dt(n.alarm_at)) return 'alarm';
+  if (n.trigger_at && T >= dt(n.trigger_at)) return 'sunrise';
+  if (manualNight || (n.in_bed && !lit)) return 'night';
+  return 'tonight';
+}
+
+function render() {
+  if (!D) return;
+  const s = state();
+  $('#night').hidden = s !== 'night'; $('#sunrise').hidden = s !== 'sunrise';
+  if (s !== 'alarm') stopAlarm();
+  if (manual && (s === 'tonight' || s === 'night')) { $('#night').hidden = true; view = manual; return }
+  ({ tonight, night, sunrise, alarm, routine, checkin, insights })[s](s !== view);
+  view = s;
+}
+
+// ---------- Tonight ----------
+function tonight(first) {
+  const p = D.plan, n = D.night, T = now(), r = D.last_reading, live = r && r.age_s < 150;
+  const lit = (r?.light ?? 0) >= D.light_dark, past = T > dt(p.asleep_by);
+  const pending = ls.get('pendingCheckin', null);
+  if (!set(`
+    <h1>Tonight</h1><div class="muted">for ${dt(p.first_event).toDateString()} · first event ${hm(dt(p.first_event))} (${p.source})</div>
+    ${past && lit ? `<div class="banner">It's past your asleep-by time (${hm(dt(p.asleep_by))}) and the lights are on. Lights off now protects your sleep target. Just a suggestion.</div>` : ''}
+    <div class="row" style="margin-top:12px">
+      <div class="card"><span>Asleep by</span><b>${hm(dt(p.asleep_by))}</b></div>
+      <div class="card"><span>Wake window</span><b>${hm(dt(p.window_start))}–${hm(dt(p.latest))}</b></div>
+      <div class="card"><span>Leave</span><b>${hm(dt(p.leave))}</b></div>
+    </div>
+    <h2>Sensor</h2>
+    <div class="card"><span class="dot ${live ? 'on' : ''}"></span>${live
+      ? `Live · ${r.temp?.toFixed(1) ?? '–'}°C · light ${r.light} · movement ${r.movement} · sound ${Math.round(r.loud ?? 0)}`
+      : `No data in the last 2.5 min. ${D.serial}`}
+      ${n.in_bed ? `<div class="muted">In bed ${hm(dt(n.in_bed))}${n.asleep ? ` · asleep ${hm(dt(n.asleep))}` : ''}</div>` : ''}</div>
+    <h2>Before bed</h2>
+    <div class="muted">Phone on the charger, away from bed. Leave this screen open. Lights off and you're done.</div>
+    <div class="row" style="margin-top:14px">
+      <button class="main" id="bed">Going to bed</button>
+      <button id="test">Test alarm sound</button>
+      <button id="ins">Insights</button>
+      ${pending ? `<button id="ci">Check in (${pending})</button>` : ''}
+    </div>`)) return;
+  $('#bed').onclick = () => { manualNight = true; keepAwake(); render() };
+  $('#test').onclick = () => { startAudio(); speak('This is your alarm test.'); setTimeout(stopAlarm, 4000) };
+  $('#ins').onclick = () => { manual = 'insights'; insights(true) };
+  if (pending) $('#ci').onclick = () => { manual = 'checkin'; checkin(true, pending) };
+}
+
+// ---------- Night ----------
+function night() {
+  const n = D.night, T = now();
+  $('#night').textContent = n.asleep ? `asleep for ${dur(T - dt(n.asleep))}` : n.in_bed ? `in bed ${dur(T - dt(n.in_bed))}` : 'goodnight';
+  $('#night').onclick = () => { manualNight = false; render() };
+  set('');
+}
+
+// ---------- Sunrise ----------
+function sunrise() {
+  const n = D.night, a = dt(n.trigger_at), b = dt(n.alarm_at), k = Math.min(1, Math.max(0, (now() - a) / (b - a || 1)));
+  const c = (x, y) => Math.round(x + (y - x) * k);
+  $('#sunrise').style.background = `radial-gradient(circle at 50% 110%, rgb(${c(120, 255)},${c(20, 230)},${c(0, 170)}) 0%, rgb(${c(20, 255)},${c(4, 160)},${c(0, 80)}) ${c(30, 90)}%, rgb(${c(0, 120)},${c(0, 60)},${c(0, 30)}) 100%)`;
+  $('#sr-time').textContent = hm(now());
+  $('#sr-msg').textContent = k > .5 ? 'Good morning. Light is coming up.' : '';
+  set('');
+}
+
+// ---------- Alarm ----------
+function startAudio() {
+  if (audio) return;
+  const ctx = new AudioContext(), g = ctx.createGain(); g.gain.value = 0.05; g.connect(ctx.destination);
+  const o = ctx.createOscillator(); o.type = 'triangle'; o.frequency.value = 660; o.connect(g); o.start();
+  const t0 = ctx.currentTime;
+  const iv = setInterval(() => { // beep pattern, louder over 60 s
+    const vol = Math.min(0.8, 0.05 + (ctx.currentTime - t0) / 75), on = Math.floor(ctx.currentTime * 2.5) % 3 !== 2;
+    g.gain.setTargetAtTime(on ? vol : 0, ctx.currentTime, 0.02);
+  }, 100);
+  audio = { ctx, iv };
+}
+function stopAlarm() {
+  if (audio) { clearInterval(audio.iv); audio.ctx.close(); audio = null }
+  try { speechSynthesis.cancel() } catch {} stopCam();
+}
+function speak(t) { try { const u = new SpeechSynthesisUtterance(t); u.rate = .95; speechSynthesis.speak(u) } catch {} }
+
+function alarm(first) {
+  const p = D.plan, T = now();
+  if (first) {
+    html = app.innerHTML = `<div class="center" style="padding-top:8vh">
+      <div class="big">${hm(T)}</div><h1>Time to get up</h1>
+      <div class="muted">Leave by ${hm(dt(p.leave))}. Stand up in front of the camera, or tap.</div>
+      <div id="cam" class="muted" style="margin:18px 0">starting camera…</div>
+      <button class="main" id="up" style="font-size:2.4rem;padding:40px 70px">I'm up</button></div>`;
+    $('#up').onclick = () => up('button');
+    startAudio(); startCam();
+    if (D.demo) setTimeout(() => state() === 'alarm' && up('demo'), 12000);
+  }
+  if (performance.now() - lastSpeak > 25000) {
+    lastSpeak = performance.now();
+    speak(`Good morning. It's ${hm(T)}. Leave by ${hm(dt(p.leave))}. Stand up to stop the alarm.`);
+  }
+}
+function up(by) { stopAlarm(); log({ woke_at: 'now', up_by: by }) }
+
+// ---------- camera: MediaPipe Pose, on-device, after the alarm only, no frames saved ----------
+let cam = null;
+async function startCam() {
+  if (camOn || D.demo) { if (D.demo) $('#cam').textContent = 'demo: pretending you stand up in a few seconds'; return }
+  camOn = true;
+  try {
+    const { FilesetResolver, PoseLandmarker } = await import('/static/vendor/vision_bundle.mjs');
+    const fs = await FilesetResolver.forVisionTasks('/static/vendor/wasm');
+    const pose = await PoseLandmarker.createFromOptions(fs, { baseOptions: { modelAssetPath: '/static/vendor/pose_landmarker_lite.task', delegate: 'GPU' }, runningMode: 'VIDEO', numPoses: 1 });
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+    if (!camOn) { stream.getTracks().forEach(t => t.stop()); return }
+    const v = document.createElement('video'); v.muted = true; v.playsInline = true; v.srcObject = stream; await v.play();
+    let since = null;
+    cam = { stream, iv: setInterval(() => {
+      const lm = pose.detectForVideo(v, performance.now()).landmarks[0], el = $('#cam');
+      const ok = lm && standing(lm);
+      since = ok ? since ?? performance.now() : null;
+      const s = since ? (performance.now() - since) / 1000 : 0;
+      if (el) el.textContent = !lm ? 'camera on · nobody in view' : ok ? `standing ${s.toFixed(1)} s…` : 'camera on · stand up so your knees are in view';
+      if (s >= 3) up('camera');
+    }, 200) };
+  } catch (e) { camOn = false; const el = $('#cam'); if (el) el.textContent = 'camera unavailable: use the button' }
+}
+function standing(l) {
+  const m = (a, b) => ({ x: (l[a].x + l[b].x) / 2, y: (l[a].y + l[b].y) / 2, v: Math.min(l[a].visibility, l[b].visibility) });
+  const sh = m(11, 12), hip = m(23, 24), kn = m(25, 26);
+  return sh.v > .5 && hip.v > .5 && kn.v > .5 && hip.y - sh.y > .12 && kn.y - hip.y > .1 && Math.abs(hip.x - sh.x) < (hip.y - sh.y) / 2;
+}
+function stopCam() { camOn = false; if (cam) { clearInterval(cam.iv); cam.stream.getTracks().forEach(t => t.stop()); cam = null } }
+
+// ---------- Routine ----------
+function routine() {
+  const p = D.plan, n = D.night, T = now(), key = 'routine:' + D.wake_date;
+  let st = ls.get(key, null);
+  if (!st) st = { i: 0, start: T.getTime(), dropped: [] };
+  const steps = p.steps.filter(s => !st.dropped.includes(s.name));
+  const curLeft = Math.max(0, steps[st.i].min - (T - st.start) / 6e4);
+  const slack = (dt(p.leave) - T) / 6e4 - curLeft - steps.slice(st.i + 1).reduce((a, s) => a + s.min, 0);
+  if (slack < 0) { // behind: drop optional steps that haven't started yet
+    const drop = steps.slice(st.i + 1).filter(s => s.optional).map(s => s.name);
+    if (drop.length) { st.dropped.push(...drop); ls.set(key, st); log({ steps_dropped: st.dropped.join('|') }); return routine() }
+  }
+  const step = steps[st.i], left = step.min * 6e4 - (T - st.start);
+  const slept = n.asleep ? dt(n.woke_at) - dt(n.asleep) : null;
+  const span = dt(p.leave) - dt(n.woke_at), used = Math.min(1, Math.max(0, (T - dt(n.woke_at)) / span));
+  const done = steps.slice(0, st.i).reduce((a, s) => a + s.min, 0) / Math.max(1, steps.reduce((a, s) => a + s.min, 0));
+  set(`
+    ${slept != null && slept < 5 * 36e5 ? `<div class="banner bad">You slept about ${dur(slept)}. Under 5 hours raises drowsy-driving risk. Consider a ride, transit, or a short delay. Not medical advice.</div>` : ''}
+    <div class="muted">Step ${st.i + 1} of ${steps.length}${st.dropped.length ? ` · dropped: ${st.dropped.join(', ')}` : ''}</div>
+    <div class="big" style="font-size:3.6rem;margin:.3em 0">${step.name}</div>
+    ${step.min ? `<div class="big" style="color:${left < 0 ? 'var(--warn)' : 'var(--fg)'}">${left < 0 ? '+' : ''}${Math.floor(Math.abs(left) / 6e4)}:${String(Math.floor(Math.abs(left) / 1e3) % 60).padStart(2, '0')}</div>` : ''}
+    <div style="margin:22px 0"><button class="main" id="next">${st.i === steps.length - 1 ? 'Leaving now' : 'Done'}</button></div>
+    <h2>Pace · leave ${hm(dt(p.leave))} · ${slack >= 0 ? `${Math.round(slack)} min spare` : `${Math.round(-slack)} min behind`}</h2>
+    <div class="bar"><i style="width:${done * 100}%;background:${done >= used ? 'var(--ok)' : 'var(--warn)'}"></i>
+      <b style="position:absolute;top:0;bottom:0;left:${used * 100}%;width:3px;background:#fff"></b></div>
+    <div class="muted" style="margin-top:6px">green bar = routine done · white line = time used</div>`);
+  const next = () => {
+    if (st.i === steps.length - 1) { ls.set(key, null); ls.set('pendingCheckin', D.wake_date); return log({ left_at: 'now' }) }
+    st.i++; st.start = now().getTime(); ls.set(key, st); render();
+  };
+  $('#next').onpointerdown = next;
+  ls.set(key, st);
+  if (D.demo && (step.min ? left <= 0 : T - st.start > 3000)) next();
+}
+
+// ---------- Check-in ----------
+function checkin(first, day = D.wake_date) {
+  if (!first && $('#ciform')) return;
+  const v = { rushed: null, feel_wake: null, feel_30: null, window_open: null };
+  const scale = (k, lo, hi) => `<div class="row scale" data-k="${k}">${[1, 2, 3, 4, 5].map(i => `<button data-v="${i}">${i}</button>`).join('')}<span class="muted" style="align-self:center">${lo} → ${hi}</span></div>`;
+  html = app.innerHTML = `<div id="ciform"><h1>Check-in</h1><div class="muted">${day}</div>
+    <h2>How rushed was the morning?</h2>${scale('rushed', 'calm', 'frantic')}
+    <h2>How did you feel at wake?</h2>${scale('feel_wake', 'wrecked', 'great')}
+    <h2>How did you feel 30 min later?</h2>${scale('feel_30', 'wrecked', 'great')}
+    <h2>Window open last night?</h2><div class="row scale" data-k="window_open"><button data-v="1">Yes</button><button data-v="0">No</button></div>
+    <h2>Note</h2><textarea id="note" rows="2"></textarea>
+    <div style="margin-top:18px"><button class="main" id="save">Save</button></div></div>`;
+  app.querySelectorAll('.scale button').forEach(b => b.onclick = () => {
+    const k = b.parentNode.dataset.k; v[k] = +b.dataset.v;
+    b.parentNode.querySelectorAll('button').forEach(x => x.classList.toggle('sel', x === b));
+  });
+  $('#save').onclick = async () => {
+    await post('/log', { wake_date: day, ...v, note: $('#note').value || null });
+    if (ls.get('pendingCheckin') === day) ls.set('pendingCheckin', null);
+    manual = null; await refresh(); if (state() !== 'insights') { manual = 'insights'; insights(true) }
+  };
+}
+
+// ---------- Insights ----------
+async function insights(first) {
+  if (!first) return;
+  const rows = await (await fetch('/nights')).json();
+  const t = s => s ? hm(dt(s)) : '–', gap = r => r.onset_gap_min == null ? '–' : `${r.onset_gap_min > 0 ? '+' : ''}${r.onset_gap_min} min`;
+  const stand = r => r.alarm_at && r.woke_at ? Math.round((dt(r.woke_at) - dt(r.alarm_at)) / 6e4) + ' min' : '–';
+  html = app.innerHTML = `<h1>Insights</h1>
+    <div class="muted">Onset gap = Nano asleep minus Watch asleep. Suggestions only, not medical advice.</div>
+    <div class="scroll"><table><tr><th>Wake date</th><th>In bed</th><th>Asleep</th><th>Woke</th><th>Left</th><th>Nano vs Watch</th><th>Room °C</th><th>Loud</th><th>Alarm→up</th><th>Rushed</th></tr>
+    ${rows.map(r => `<tr><td>${r.wake_date}</td><td>${t(r.in_bed)}</td><td>${t(r.asleep)}</td><td>${t(r.woke_at)}</td><td>${t(r.left_at)}</td><td>${gap(r)}</td>
+      <td>${r.room_temp ?? '–'}</td><td>${r.loud_events ?? '–'}</td><td>${stand(r)}</td><td>${r.rushed ?? '–'}</td></tr>`).join('')}</table></div>
+    <div class="row" style="margin-top:18px"><button id="back">Back</button><a href="/export.csv"><button>Export CSV</button></a></div>`;
+  $('#back').onclick = () => { manual = null; view = null; render() };
+}
+
+// ---------- loop ----------
+document.addEventListener('click', () => { keepAwake(); audio?.ctx.resume() });
+await refresh(); keepAwake();
+setInterval(() => refresh().catch(() => {}), D.demo ? 1000 : 3000);
+setInterval(render, 250);
+render();
+</script></body></html>
