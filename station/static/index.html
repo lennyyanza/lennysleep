@@ -28,7 +28,7 @@ table{width:100%;border-collapse:collapse;font-size:.9rem;font-variant-numeric:t
 <div id="sunrise" hidden><div class="big" id="sr-time"></div><div id="sr-msg"></div></div>
 <script type="module">
 const $ = s => document.querySelector(s), app = $('#app');
-let D = null, fetchedAt = 0, view = null, manual = null, manualNight = false, camOn = false, audio = null, lastSpeak = 0;
+let D = null, fetchedAt = 0, view = null, manual = null, manualNight = false, nightOffUntil = 0, camOn = false, audio = null, lastSpeak = 0;
 const ls = { get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d } catch { return d } },
              set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)) } catch {} } };
 const dt = s => s ? new Date(s.replace(' ', 'T')) : null;
@@ -58,7 +58,7 @@ function state() {
   if (n.woke_at) return 'routine';
   if (n.alarm_at && T >= dt(n.alarm_at)) return 'alarm';
   if (n.trigger_at && T >= dt(n.trigger_at)) return 'sunrise';
-  if (manualNight || (n.in_bed && !lit)) return 'night';
+  if (manualNight || (n.in_bed && !lit && performance.now() > nightOffUntil)) return 'night';
   return 'tonight';
 }
 
@@ -108,7 +108,7 @@ function tonight(first) {
 function night() {
   const n = D.night, T = now();
   $('#night').textContent = n.asleep ? `asleep for ${dur(T - dt(n.asleep))}` : n.in_bed ? `in bed ${dur(T - dt(n.in_bed))}` : 'goodnight';
-  $('#night').onclick = () => { manualNight = false; render() };
+  $('#night').onclick = () => { manualNight = false; nightOffUntil = performance.now() + 60000; render() };
   set('');
 }
 
