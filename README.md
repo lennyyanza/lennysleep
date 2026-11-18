@@ -3,6 +3,32 @@
 A bedside station: an Arduino logs your room all night, the laptop works out when you fell asleep and wakes
 you with a screen sunrise inside a window that still gets you out the door on time. Your phone stays on the charger.
 
+## Why I built it
+
+My mornings were bad: a fixed alarm went off in the middle of deep sleep, I grabbed my phone first thing, and I
+was rushing out the door. I wanted to wake up better, and I wanted numbers instead of guesses. So I built this for
+myself. It knows when I actually fell asleep, wakes me at a light moment before I'd be late, gets me out of bed
+without the phone, and paces the morning against my real leave time. Every night it logs what happened, plus
+how I felt, so I can see what actually helps.
+
+On day 0 (before this project) I rated my morning 5/5 for rushed. The first real night with it, I rated it 1/5,
+woke up inside the window and left 10 minutes early.
+
+## Stack
+
+| Part | What | Why |
+|---|---|---|
+| Sensor | Arduino Nano 33 BLE Sense (C++, raw I2C registers, no libraries) | Movement (IMU), temperature, light and loudness from one board on the mattress. Loudness is RMS only and audio never leaves the chip. |
+| Backend | Python, FastAPI, Uvicorn, SQLite | Reads the board over USB serial (pyserial), stores one row a minute, plans the night and runs the wake logic. |
+| Planning | iCalendar feed (icalendar, httpx) | Tomorrow's first event sets the deadline, and the wake time is worked backwards from it. |
+| Frontend | Single-file HTML/JS in a Brave kiosk window | Screen sunrise, alarm (Web Audio), routine steps with a leave-time countdown, check-in and insights. |
+| Get-up check | MediaPipe pose detection in the browser (WASM) | The alarm stops only when you're standing. It runs on the device and keeps no frames. |
+| Watch data | iPhone Shortcut → `POST /sleep`, Apple Health XML import | Merges Apple Watch sleep and heart rate with the room data. |
+| Timelapse (optional) | OpenCV | Turns the night's webcam frames into an MP4 that stays on the laptop. |
+| Tests | pytest | Plan math, sleep detection, wake decisions and the API, on sample data. |
+
+Everything runs offline on one laptop. Nothing goes to a cloud service.
+
 ## How it works
 
 1. `plan.py` reads tomorrow's first calendar event and works backwards: event − commute − buffer − routine = **latest** wake, with a 15-min window before it and an **asleep-by** time 7.5 h earlier.
@@ -14,7 +40,7 @@ you with a screen sunrise inside a window that still gets you out the door on ti
 ## Setup (once)
 
 ```
-git clone … ~/lennysleep && cd ~/lennysleep
+git clone https://github.com/lennyyanza/lennysleep ~/lennysleep && cd ~/lennysleep
 echo 'ICAL_URL=https://calendar.google.com/calendar/ical/…/basic.ics' > .env   # secret iCal address; optional
 arduino-cli compile -b arduino:mbed_nano:nano33ble sensor && arduino-cli upload -b arduino:mbed_nano:nano33ble -p /dev/ttyACM0 sensor
 ./run.sh demo    # 2-minute demo morning on sample data (separate demo.db); Alt+F4 to exit
