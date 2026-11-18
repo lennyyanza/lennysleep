@@ -51,5 +51,38 @@ END:VCALENDAR
 
 def test_first_event_with_rrule():
     cal = Calendar.from_ical(ICS)
-    assert plan.first_event_on(cal, date(2026, 11, 18)) == t("2026-11-18 07:30")  # Wednesday repeat beats 9:00
+    assert plan.first_event_on(cal, date(2026, 11, 18))[0] == t("2026-11-18 07:30")  # Wednesday repeat beats 9:00
     assert plan.first_event_on(cal, date(2026, 11, 19)) is None
+
+
+def test_earliest_event_across_calendars(monkeypatch):
+    ics = lambda hm: Calendar.from_ical(f"BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:{hm}\nDTSTART:20261118T{hm}00\nEND:VEVENT\nEND:VCALENDAR".encode())
+    cals = {"a": ics("0900"), "b": ics("0730"), "c": None}  # c = failed fetch
+    monkeypatch.setenv("ICAL_URL", "a b c")
+    monkeypatch.setattr(plan, "_calendar", cals.get)
+    assert plan.plan_for(date(2026, 11, 18))["first_event"] == t("2026-11-18 07:30")
+
+
+def test_walk_time_sets_commute(monkeypatch):
+    ev = "BEGIN:VEVENT\nUID:{u}\nDTSTART:20261118T{hm}00\nLOCATION:{loc}\nEND:VEVENT\n"
+    cal = Calendar.from_ical(("BEGIN:VCALENDAR\n" + ev.format(u=1, hm="0900", loc="Babbio 221") + "END:VCALENDAR").encode())
+    calls = []
+
+    class R:
+        def __init__(self, j): self.json = lambda: j
+
+    def get(url, params=None, **kw):
+        calls.append(params.get("q"))
+        return R([{"lat": "40.746", "lon": "-74.024"}] if "nominatim" in url else {"routes": [{"duration": 720.5}]})
+    monkeypatch.setattr(plan, "HOME", "40.7495,-74.0321")
+    monkeypatch.setattr(plan, "_travel", {})
+    monkeypatch.setenv("ICAL_URL", "a")
+    monkeypatch.setattr(plan, "_calendar", lambda u: cal)
+    monkeypatch.setattr("httpx.get", get)
+    p = plan.plan_for(date(2026, 11, 18))
+    assert (p["commute_min"], p["location"], calls[0]) == (13, "Babbio 221", "Babbio")  # room number dropped
+    assert p["leave"] == t("2026-11-18 08:37")  # 9:00 - 13 walk - 10 buffer
+    plan.plan_for(date(2026, 11, 18))
+    assert len(calls) == 2  # cached: one search + one route
+    monkeypatch.setattr(plan, "HOME", None)
+    assert plan.plan_for(date(2026, 11, 18))["commute_min"] == plan.COMMUTE

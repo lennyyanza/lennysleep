@@ -20,7 +20,7 @@ arduino-cli compile -b arduino:mbed_nano:nano33ble sensor && arduino-cli upload 
 ./run.sh demo    # 2-minute demo morning on sample data (separate demo.db); Alt+F4 to exit
 ```
 `run.sh` creates `.venv` and downloads MediaPipe (about 25 MB) the first time. After that everything runs offline.
-Settings go in `.env` (all optional): `COMMUTE_MIN=10 BUFFER_MIN=10 TARGET_SLEEP_H=7.5 DEFAULT_EVENT=06:00 LIGHT_DARK=5 LOUD_RMS=300 SERIAL_PORT=/dev/ttyACM0`.
+Settings go in `.env` (all optional): `COMMUTE_MIN=10 BUFFER_MIN=10 TARGET_SLEEP_H=7.5 DEFAULT_EVENT=06:00 LIGHT_DARK=5 LOUD_RMS=300 SERIAL_PORT=/dev/ttyACM0 SPOTIFY_URL=https://open.spotify.com/playlist/… MUSIC_VOL=0.25`. Calendar: `ICAL_URL` takes several links separated by spaces; `HOME_LATLON=lat,lon` turns the commute into walking time.
 Routine steps live in `STEPS` in `station/plan.py` (optional steps get dropped when you're behind).
 iPhone side: see [SHORTCUT.md](SHORTCUT.md).
 

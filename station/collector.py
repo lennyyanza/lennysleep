@@ -29,6 +29,8 @@ DEMO = os.getenv("DEMO") == "1"
 SPEED = float(os.getenv("DEMO_SPEED", 10)) if DEMO else 1.0
 DB = os.getenv("DB", str(HERE / ("demo.db" if DEMO else "lennysleep.db")))
 LOUD = float(os.getenv("LOUD_RMS", 300))
+# practice run (./run.sh test N): real sensor/sunrise/audio/camera, alarm N min after start, own DB
+REHEARSE_AT = datetime.now().replace(second=0, microsecond=0) + timedelta(minutes=float(os.getenv("REHEARSE_MIN", 0)))
 NIGHT_COLS = """first_event leave latest window_start asleep_by in_bed asleep watch_onset watch_wake onset_gap_min
 watch_asleep_min hr hrv stages trigger_at trigger_reason alarm_at woke_at up_by left_at steps_dropped
 rushed feel_wake feel_30 window_open note room_temp loud_events""".split()
@@ -129,6 +131,10 @@ def serial_loop():
 
 # ---- engine ----
 def get_plan(day):
+    if os.getenv("REHEARSE_MIN"):  # plan so that latest == REHEARSE_AT
+        lead = planmod.COMMUTE + planmod.BUFFER + sum(m for _, m, _ in planmod.STEPS)
+        return planmod.make_plan(REHEARSE_AT + timedelta(minutes=lead)) | {"source": "practice run", "wake_date": str(day),
+                                                                              "asleep_by": REHEARSE_AT}
     return planmod.make_plan(datetime.combine(day, dtime(6))) | {"source": "demo", "wake_date": str(day)} \
         if DEMO else planmod.plan_for(day)
 
@@ -154,8 +160,33 @@ def tick():
     if not night(day).get("trigger_at") and (d := wake_engine.decide(t, p, rd, asleep)):
         f["trigger_at"], f["alarm_at"], f["trigger_reason"] = d
         if not DEMO:
+            wake_engine.alarm_audio()
             wake_engine.sunrise((d[1] - d[0]).total_seconds())
+    n = night(day)
+    if (n.get("alarm_at") and not n.get("woke_at") and t >= datetime.fromisoformat(n["alarm_at"])
+            and wake_engine.up_from_sensor(rd, datetime.fromisoformat(n["alarm_at"]))):
+        f["woke_at"], f["up_by"] = iso(t), "sensor"  # the page sees woke_at and stops the alarm
+        if not DEMO:
+            woke_up()
     return upsert(day, **f)
+
+
+def woke_up():
+    wake_engine.music_audio()
+    threading.Thread(target=wake_engine.music_start, daemon=True).start()
+
+
+def audio_loop():
+    """Every second: music follows the buds the moment they connect, stops when they disconnect or the event starts."""
+    while True:
+        try:
+            day = planmod.wake_date_for(now())
+            n = night(day)
+            if n.get("first_event"):
+                wake_engine.music_tick(day, n.get("woke_at"), datetime.fromisoformat(n["first_event"]), now())
+        except Exception as e:
+            print("audio error:", repr(e))
+        time.sleep(1)
 
 
 def engine_loop():
@@ -277,6 +308,8 @@ async def lifespan(app):
         threading.Thread(target=serial_loop, daemon=True).start()
     if os.getenv("NO_ENGINE") != "1":
         threading.Thread(target=engine_loop, daemon=True).start()
+        if not DEMO:
+            threading.Thread(target=audio_loop, daemon=True).start()
     yield
 
 
@@ -293,6 +326,21 @@ def index():
 def get_plan_api(day: str | None = None):
     d = date.fromisoformat(day) if day else planmod.wake_date_for(now())
     return {k: iso(v) for k, v in get_plan(d).items()}
+
+
+@app.post("/audio/test")
+def audio_test():
+    if not DEMO:
+        wake_engine.alarm_audio()
+    return {"ok": True}
+
+
+@app.post("/refresh")
+def refresh_calendar():
+    """Re-read the calendar(s) and walking times now instead of waiting up to 15 min."""
+    planmod._cache.clear()
+    planmod._travel.clear()
+    return get_plan_api()
 
 
 @app.get("/today")
@@ -346,4 +394,6 @@ async def post_log(request: Request):
     bad = set(data) - LOG_FIELDS
     if bad:
         raise HTTPException(400, f"unknown fields: {sorted(bad)}")
+    if "woke_at" in data and not DEMO:
+        woke_up()
     return upsert(day, **{k: iso(now()) if v == "now" else v for k, v in data.items()})

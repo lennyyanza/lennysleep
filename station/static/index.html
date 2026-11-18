@@ -78,7 +78,7 @@ function tonight(first) {
   const lit = (r?.light ?? 0) >= D.light_dark, past = T > dt(p.asleep_by);
   const pending = ls.get('pendingCheckin', null);
   if (!set(`
-    <h1>Tonight</h1><div class="muted">for ${dt(p.first_event).toDateString()} · first event ${hm(dt(p.first_event))} (${p.source})</div>
+    <h1>Tonight</h1><div class="muted">for ${dt(p.first_event).toDateString()} · first event ${hm(dt(p.first_event))} (${p.source})${p.location ? ` · ${p.location.split('\n')[0]}` : ''} · ${p.commute_min} min to get there</div>
     ${past && lit ? `<div class="banner">It's past your asleep-by time (${hm(dt(p.asleep_by))}) and the lights are on. Lights off now protects your sleep target. Just a suggestion.</div>` : ''}
     <div class="row" style="margin-top:12px">
       <div class="card"><span>Asleep by</span><b>${hm(dt(p.asleep_by))}</b></div>
@@ -96,11 +96,13 @@ function tonight(first) {
       <button class="main" id="bed">Going to bed</button>
       <button id="test">Test alarm sound</button>
       <button id="ins">Insights</button>
+      <button id="cal">Refresh calendar</button>
       ${pending ? `<button id="ci">Check in (${pending})</button>` : ''}
     </div>`)) return;
   $('#bed').onclick = () => { manualNight = true; keepAwake(); render() };
-  $('#test').onclick = () => { startAudio(); speak('This is your alarm test.'); setTimeout(stopAlarm, 4000) };
+  $('#test').onclick = async () => { await post('/audio/test', {}).catch(() => {}); startAudio(); speak('This is your alarm test.'); setTimeout(stopAlarm, 4000) };
   $('#ins').onclick = () => { manual = 'insights'; insights(true) };
+  $('#cal').onclick = async e => { e.target.disabled = true; e.target.textContent = 'Refreshing…'; await post('/refresh', {}).catch(() => {}); await refresh(); html = ''; render() };
   if (pending) $('#ci').onclick = () => { manual = 'checkin'; checkin(true, pending) };
 }
 
@@ -145,7 +147,7 @@ function alarm(first) {
   if (first) {
     html = app.innerHTML = `<div class="center" style="padding-top:8vh">
       <div class="big">${hm(T)}</div><h1>Time to get up</h1>
-      <div class="muted">Leave by ${hm(dt(p.leave))}. Stand up in front of the camera, or tap.</div>
+      <div class="muted">Leave by ${hm(dt(p.leave))}. Sit up or move around in front of the camera, or tap.</div>
       <div id="cam" class="muted" style="margin:18px 0">starting camera…</div>
       <button class="main" id="up" style="font-size:2.4rem;padding:40px 70px">I'm up</button></div>`;
     $('#up').onclick = () => up('button');
@@ -154,10 +156,11 @@ function alarm(first) {
   }
   if (performance.now() - lastSpeak > 25000) {
     lastSpeak = performance.now();
-    speak(`Good morning. It's ${hm(T)}. Leave by ${hm(dt(p.leave))}. Stand up to stop the alarm.`);
+    speak(`Good morning. It's ${hm(T)}. Leave by ${hm(dt(p.leave))}. Sit up and move to stop the alarm.`);
   }
 }
-function up(by) { stopAlarm(); log({ woke_at: 'now', up_by: by }) }
+function up(by) { stopAlarm(); log({ woke_at: 'now', up_by: by }) }  // server switches output + volume and starts Spotify
+
 
 // ---------- camera: MediaPipe Pose, on-device, after the alarm only, no frames saved ----------
 let cam = null;
@@ -171,21 +174,31 @@ async function startCam() {
     const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
     if (!camOn) { stream.getTracks().forEach(t => t.stop()); return }
     const v = document.createElement('video'); v.muted = true; v.playsInline = true; v.srcObject = stream; await v.play();
-    let since = null;
+    // up = sitting up for 3 s, or moving in 5 of the last 6 s (tiny 64x48 frame diff, nothing kept)
+    const cv = document.createElement('canvas'); cv.width = 64; cv.height = 48;
+    const cx = cv.getContext('2d', { willReadFrequently: true });
+    let since = null, prev = null, moveSecs = new Set();
     cam = { stream, iv: setInterval(() => {
-      const lm = pose.detectForVideo(v, performance.now()).landmarks[0], el = $('#cam');
-      const ok = lm && standing(lm);
-      since = ok ? since ?? performance.now() : null;
-      const s = since ? (performance.now() - since) / 1000 : 0;
-      if (el) el.textContent = !lm ? 'camera on · nobody in view' : ok ? `standing ${s.toFixed(1)} s…` : 'camera on · stand up so your knees are in view';
-      if (s >= 3) up('camera');
+      const t = performance.now(), lm = pose.detectForVideo(v, t).landmarks[0], el = $('#cam');
+      cx.drawImage(v, 0, 0, 64, 48); const px = cx.getImageData(0, 0, 64, 48).data;
+      let changed = 0;
+      if (prev) for (let i = 1; i < px.length; i += 4) if (Math.abs(px[i] - prev[i]) > 25) changed++;
+      prev = px;
+      const sec = Math.floor(t / 1000);
+      if (changed > 64 * 48 * 0.03) moveSecs.add(sec);
+      moveSecs = new Set([...moveSecs].filter(x => x > sec - 6));
+      const ok = lm && sittingUp(lm);
+      since = ok ? since ?? t : null;
+      const s = since ? (t - since) / 1000 : 0;
+      if (el) el.textContent = `camera on · ${ok ? `sitting up ${s.toFixed(1)} s` : lm ? 'I see you' : 'nobody in view'} · moving ${moveSecs.size}/5 s`;
+      if (s >= 3) up('camera: sat up'); else if (moveSecs.size >= 5) up('camera: moving');
     }, 200) };
   } catch (e) { camOn = false; const el = $('#cam'); if (el) el.textContent = 'camera unavailable: use the button' }
 }
-function standing(l) {
-  const m = (a, b) => ({ x: (l[a].x + l[b].x) / 2, y: (l[a].y + l[b].y) / 2, v: Math.min(l[a].visibility, l[b].visibility) });
-  const sh = m(11, 12), hip = m(23, 24), kn = m(25, 26);
-  return sh.v > .5 && hip.v > .5 && kn.v > .5 && hip.y - sh.y > .12 && kn.y - hip.y > .1 && Math.abs(hip.x - sh.x) < (hip.y - sh.y) / 2;
+function sittingUp(l) { // head clearly above level shoulders; lying down, head and shoulders end up side by side
+  const [n, a, b] = [l[0], l[11], l[12]], w = Math.abs(a.x - b.x);
+  return n.visibility > .5 && a.visibility > .5 && b.visibility > .5 && w > .05
+    && Math.abs(a.y - b.y) < w / 2 && (a.y + b.y) / 2 - n.y > w * .6;
 }
 function stopCam() { camOn = false; if (cam) { clearInterval(cam.iv); cam.stream.getTracks().forEach(t => t.stop()); cam = null } }
 

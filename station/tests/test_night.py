@@ -67,3 +67,56 @@ def test_never_after_latest():
     trig, alarm, _ = wake_engine.decide(late, P, night(), datetime(2026, 11, 17, 21, 30))
     assert alarm == late  # missed window (e.g. laptop was off): ring now, not later
     assert wake_engine.decide(P["latest"] + timedelta(hours=2), P, night(), None) is None
+
+
+def test_sink_picks_speakers_and_buds():
+    import wake_engine
+    status = """ ├─ Sinks:
+ │  *   51. alsa_output.pci-0000_00_1f.3.analog-stereo [vol: 0.00 MUTED]
+ │      88. bluez_output.B8_7B_D4_18_B8_71.1 [vol: 0.60]
+ ├─ Sources:
+ │  *   52. alsa_input.pci-0000_00_1f.3.analog-stereo [vol: 1.00]"""
+    assert wake_engine._sink("alsa_output", status) == "51"
+    assert wake_engine._sink("bluez_output", status) == "88"
+    assert wake_engine._sink("bluez_output", status.replace("bluez", "x")) is None
+
+
+def test_music_follows_buds_once(monkeypatch):
+    import wake_engine
+    sinks, used = {"alsa_output": "51", "bluez_output": None}, []
+    monkeypatch.setattr(wake_engine, "_sink", sinks.get)
+    monkeypatch.setattr(wake_engine, "_use", lambda s, v: used.append(s))
+    wake_engine.alarm_audio(); wake_engine.music_audio(); wake_engine.music_audio()
+    sinks["bluez_output"] = "61"  # buds connect mid-routine
+    wake_engine.music_audio(); wake_engine.music_audio()
+    assert used == ["51", "51", "61"]  # alarm, music on speakers, then buds; no repeats
+
+
+def test_up_from_sensor():
+    from datetime import datetime, timedelta
+    import wake_engine
+    a = datetime(2026, 11, 18, 7, 8)
+    rows = [(a - timedelta(minutes=1), 30, 0), (a + timedelta(minutes=1), 4, 0)]
+    assert not wake_engine.up_from_sensor(rows, a, 10)  # big move before the alarm and a small roll after don't count
+    assert wake_engine.up_from_sensor(rows + [(a + timedelta(minutes=2), 12, 0)], a, 10)
+
+
+def test_music_tick_follows_and_stops(monkeypatch):
+    from datetime import datetime, timedelta
+    import wake_engine
+    sinks, calls = {"alsa_output": "51", "bluez_output": None}, []
+    monkeypatch.setattr(wake_engine, "_sink", sinks.get)
+    monkeypatch.setattr(wake_engine, "_use", lambda s, v: calls.append(s))
+    monkeypatch.setattr(wake_engine, "_pc", lambda *a: calls.append(a[0]))
+    ev, t = datetime(2026, 11, 18, 8), datetime(2026, 11, 18, 7, 10)
+    wake_engine.alarm_audio(); calls.clear()
+    wake_engine.music_tick("d1", None, ev, t)                 # not up yet: nothing
+    wake_engine.music_tick("d1", "07:09", ev, t)              # up: speakers
+    sinks["bluez_output"] = "61"
+    wake_engine.music_tick("d1", "07:09", ev, t)              # buds connect: move
+    sinks["bluez_output"] = None
+    wake_engine.music_tick("d1", "07:09", ev, t)              # buds out: pause
+    wake_engine.music_tick("d1", "07:09", ev, t)              # stays stopped
+    assert calls == ["51", "61", "pause"]
+    wake_engine.music_tick("d2", "07:09", ev, ev + timedelta(minutes=1))  # new day, event passed: pause
+    assert calls[-1] == "pause"
