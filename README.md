@@ -1,18 +1,13 @@
 # lennysleep
 
-A bedside station: an Arduino logs your room all night, the laptop works out when you fell asleep and wakes
+A bedside station: an Arduino logs your room all night, the laptop works out when you fall asleep and wakes
 you with a screen sunrise inside a window that still gets you out the door on time. Your phone stays on the charger.
 
 ## Why I built it
 
-My mornings were bad: a fixed alarm went off in the middle of deep sleep, I grabbed my phone first thing, and I
-was rushing out the door. I wanted to wake up better, and I wanted numbers instead of guesses. So I built this for
-myself. It knows when I actually fell asleep, wakes me at a light moment before I'd be late, gets me out of bed
-without the phone, and paces the morning against my real leave time. Every night it logs what happened, plus
-how I felt, so I can see what actually helps.
-
-On day 0 (before this project) I rated my morning 5/5 for rushed. The first real night with it, I rated it 1/5,
-woke up inside the window and left 10 minutes early.
+I care about getting the most optimal sleep, and sometimes with school, work, and other responsibilities it takes time to 
+get into bed and get out of bed. So, to get more sleep, I built this to get straight to bed, know when I need to wake up, and 
+get me out of bed without having to touch my phone and all done automatically. 
 
 ## Stack
 
@@ -45,7 +40,7 @@ echo 'ICAL_URL=https://calendar.google.com/calendar/ical/…/basic.ics' > .env  
 arduino-cli compile -b arduino:mbed_nano:nano33ble sensor && arduino-cli upload -b arduino:mbed_nano:nano33ble -p /dev/ttyACM0 sensor
 ./run.sh demo    # 2-minute demo morning on sample data (separate demo.db); Alt+F4 to exit
 ```
-`run.sh` creates `.venv` and downloads MediaPipe (about 25 MB) the first time. After that everything runs offline.
+`run.sh` creates `.venv` and downloads MediaPipe (about 25 MB) the first time. After that, everything runs offline.
 Settings go in `.env` (all optional): `COMMUTE_MIN=10 BUFFER_MIN=10 TARGET_SLEEP_H=7.5 DEFAULT_EVENT=06:00 LIGHT_DARK=5 LOUD_RMS=300 SERIAL_PORT=/dev/ttyACM0 SPOTIFY_URL=https://open.spotify.com/playlist/… MUSIC_VOL=0.25`. Calendar: `ICAL_URL` takes several links separated by spaces; `HOME_LATLON=lat,lon` turns the commute into walking time.
 Routine steps live in `STEPS` in `station/plan.py` (optional steps get dropped when you're behind).
 iPhone side: see [SHORTCUT.md](SHORTCUT.md).
@@ -59,7 +54,7 @@ iPhone side: see [SHORTCUT.md](SHORTCUT.md).
 - [ ] Phone on its charger, away from the bed. First night only: keep a backup alarm set for the *latest* time until you trust this.
 - [ ] Tap **Going to bed** (or just turn the lights off; the screen goes black and dims on its own).
 - [ ] Morning: stand up or tap **I'm up**, follow the steps, then do the check-in tonight from the Tonight screen.
-- [ ] (Shortcut) if `ufw` is enabled: `sudo ufw allow from 192.168.0.0/16 to any port 8000 proto tcp`.
+- [ ] (Shortcut) If `ufw` is enabled: `sudo ufw allow from 192.168.0.0/16 to any port 8000 proto tcp`.
 
 ## Data
 
