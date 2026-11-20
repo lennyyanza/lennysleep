@@ -148,8 +148,8 @@ def tick():
     in_bed, asleep = sleep_detect.detect(rd)
     f = {k: p[k] for k in ("first_event", "leave", "latest", "window_start", "asleep_by")}
     if in_bed:
-        if not DEMO and not night(day).get("in_bed"):  # lights out: dim the screen so it doesn't light the room
-            subprocess.run(["brightnessctl", "-q", "set", "5%"], check=False)
+        if not DEMO and not night(day).get("in_bed"):  # lights out: backlight off so it doesn't light the room
+            screen(0)
         f["in_bed"] = in_bed
         after = [r for r in rows if r["ts"] >= iso(in_bed)]
         temps = [r["temp"] for r in after if r["temp"] is not None]
@@ -385,6 +385,19 @@ async def post_sleep(request: Request):
     if not merged:
         raise HTTPException(400, "no asleep segments found")
     return {"merged": merged}
+
+
+def screen(pct):
+    subprocess.run(["brightnessctl", "-q", "set", f"{pct}%"], check=False)
+
+
+@app.post("/screen/{pct}")
+def post_screen(pct: int):
+    if not 0 <= pct <= 100:
+        raise HTTPException(400, "pct must be 0-100")
+    if not DEMO:
+        screen(pct)
+    return {"brightness": pct}
 
 
 @app.post("/log")

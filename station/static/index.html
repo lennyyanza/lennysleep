@@ -15,7 +15,7 @@ button.sel{background:var(--acc);color:#0d0f14}
 .banner{border-radius:12px;padding:12px 16px;margin:12px 0;background:#3a2a10;color:#ffd79a}
 .banner.bad{background:#3a1414;color:#ffb4b4}.banner.demo{background:#1d2b4a;color:#b9d0ff;text-align:center}
 .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px;background:var(--bad)}.dot.on{background:var(--ok)}
-#night{position:fixed;inset:0;background:#000;color:#3a3a3a;display:flex;align-items:flex-end;justify-content:center;padding-bottom:40px;font-size:1.1rem}
+#night{position:fixed;inset:0;background:#000;color:#000;display:flex;align-items:flex-end;justify-content:center;padding-bottom:40px;font-size:1.1rem}
 #sunrise{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;color:#2b1200}
 .bar{height:22px;background:#2a2f3b;border-radius:11px;overflow:hidden;position:relative}.bar i{display:block;height:100%;background:var(--ok)}
 table{width:100%;border-collapse:collapse;font-size:.9rem;font-variant-numeric:tabular-nums}th,td{padding:6px 8px;text-align:left;border-bottom:1px solid #222}th{color:var(--dim);font-weight:500}
@@ -99,7 +99,7 @@ function tonight(first) {
       <button id="cal">Refresh calendar</button>
       ${pending ? `<button id="ci">Check in (${pending})</button>` : ''}
     </div>`)) return;
-  $('#bed').onclick = () => { manualNight = true; keepAwake(); render() };
+  $('#bed').onclick = () => { manualNight = true; keepAwake(); fetch('/screen/0', { method: 'POST' }); render() };
   $('#test').onclick = async () => { await post('/audio/test', {}).catch(() => {}); startAudio(); speak('This is your alarm test.'); setTimeout(stopAlarm, 4000) };
   $('#ins').onclick = () => { manual = 'insights'; insights(true) };
   $('#cal').onclick = async e => { e.target.disabled = true; e.target.textContent = 'Refreshing…'; await post('/refresh', {}).catch(() => {}); await refresh(); html = ''; render() };
@@ -110,7 +110,7 @@ function tonight(first) {
 function night() {
   const n = D.night, T = now();
   $('#night').textContent = n.asleep ? `asleep for ${dur(T - dt(n.asleep))}` : n.in_bed ? `in bed ${dur(T - dt(n.in_bed))}` : 'goodnight';
-  $('#night').onclick = () => { manualNight = false; nightOffUntil = performance.now() + 60000; render() };
+  $('#night').onclick = () => { manualNight = false; nightOffUntil = performance.now() + 60000; fetch('/screen/50', { method: 'POST' }); render() };
   set('');
 }
 
@@ -174,7 +174,7 @@ async function startCam() {
     const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
     if (!camOn) { stream.getTracks().forEach(t => t.stop()); return }
     const v = document.createElement('video'); v.muted = true; v.playsInline = true; v.srcObject = stream; await v.play();
-    // up = sitting up for 3 s, or moving in 5 of the last 6 s (tiny 64x48 frame diff, nothing kept)
+    // up = sitting up for 5 s, or moving in 7 of the last 8 s (tiny 64x48 frame diff, nothing kept)
     const cv = document.createElement('canvas'); cv.width = 64; cv.height = 48;
     const cx = cv.getContext('2d', { willReadFrequently: true });
     let since = null, prev = null, moveSecs = new Set();
@@ -186,12 +186,12 @@ async function startCam() {
       prev = px;
       const sec = Math.floor(t / 1000);
       if (changed > 64 * 48 * 0.03) moveSecs.add(sec);
-      moveSecs = new Set([...moveSecs].filter(x => x > sec - 6));
+      moveSecs = new Set([...moveSecs].filter(x => x > sec - 8));
       const ok = lm && sittingUp(lm);
       since = ok ? since ?? t : null;
       const s = since ? (t - since) / 1000 : 0;
-      if (el) el.textContent = `camera on · ${ok ? `sitting up ${s.toFixed(1)} s` : lm ? 'I see you' : 'nobody in view'} · moving ${moveSecs.size}/5 s`;
-      if (s >= 3) up('camera: sat up'); else if (moveSecs.size >= 5) up('camera: moving');
+      if (el) el.textContent = `camera on · ${ok ? `sitting up ${s.toFixed(1)} s` : lm ? 'I see you' : 'nobody in view'} · moving ${moveSecs.size}/7 s`;
+      if (s >= 5) up('camera: sat up'); else if (moveSecs.size >= 7) up('camera: moving');
     }, 200) };
   } catch (e) { camOn = false; const el = $('#cam'); if (el) el.textContent = 'camera unavailable: use the button' }
 }
