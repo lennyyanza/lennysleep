@@ -38,9 +38,18 @@ def up_from_sensor(readings, alarm_at, threshold=MOVE_UP):
     return any(ts > alarm_at and m is not None and m >= threshold for ts, m, _ in readings)
 
 
+def power(on):
+    """Monitor fully on/off (DPMS) via GNOME Mutter; brightness 0 alone still glows. Any touch/key wakes it."""
+    subprocess.run(["gdbus", "call", "--session", "--dest", "org.gnome.Mutter.DisplayConfig",
+                    "--object-path", "/org/gnome/Mutter/DisplayConfig", "--method", "org.freedesktop.DBus.Properties.Set",
+                    "org.gnome.Mutter.DisplayConfig", "PowerSaveMode", f"<int32 {0 if on else 3}>"],
+                   capture_output=True, check=False)
+
+
 def sunrise(seconds=300, steps=60):
-    """Ramp backlight 5% -> 100% in a background thread."""
+    """Monitor on, then ramp backlight 5% -> 100% in a background thread."""
     def run():
+        power(True)
         for i in range(steps + 1):
             subprocess.run(["brightnessctl", "-q", "set", f"{5 + 95 * i // steps}%"], check=False)
             time.sleep(seconds / steps)

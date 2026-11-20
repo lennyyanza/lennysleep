@@ -148,7 +148,7 @@ def tick():
     in_bed, asleep = sleep_detect.detect(rd)
     f = {k: p[k] for k in ("first_event", "leave", "latest", "window_start", "asleep_by")}
     if in_bed:
-        if not DEMO and not night(day).get("in_bed"):  # lights out: backlight off so it doesn't light the room
+        if not DEMO and not night(day).get("in_bed"):  # lights out: monitor off so it doesn't light the room
             screen(0)
         f["in_bed"] = in_bed
         after = [r for r in rows if r["ts"] >= iso(in_bed)]
@@ -388,7 +388,9 @@ async def post_sleep(request: Request):
 
 
 def screen(pct):
-    subprocess.run(["brightnessctl", "-q", "set", f"{pct}%"], check=False)
+    """0 = monitor fully off (left at 5% so an accidental touch wakes it dim); otherwise on at pct."""
+    subprocess.run(["brightnessctl", "-q", "set", f"{pct or 5}%"], check=False)
+    wake_engine.power(pct > 0)
 
 
 @app.post("/screen/{pct}")

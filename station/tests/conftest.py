@@ -15,5 +15,6 @@ def no_hardware(monkeypatch):
     """Tests never touch the real speakers, Spotify or backlight."""
     import wake_engine
     monkeypatch.setattr(wake_engine, "_use", lambda *a: None)
+    monkeypatch.setattr(wake_engine, "power", lambda *a: None)
     monkeypatch.setattr(wake_engine, "_pc", lambda *a: False)
     monkeypatch.setattr(wake_engine, "SPOTIFY_URI", "")
